@@ -529,14 +529,17 @@
                     </datalist>
                 </div>
                 <div class="control model-picker" aria-label="Pilih model">
-                    <label hidden for="model_name">Search Model</label>
+                    <label hidden for="model_name">Pilih Model</label>
                     <div class="model-input-wrap">
-                        <input class="model-search-input" id="model_name" name="model_name" type="search"
-                            value="{{ old('model_name') }}" placeholder="Search Model" maxlength="100"
-                            autocomplete="off" required>
-                        <button type="button" class="search-btn" id="model-search-btn">Cari</button>
+                        <select class="model-search-input" id="model_name" name="model_name" required>
+                            <option value="">Pilih Model</option>
+                            @foreach ($modelNames as $modelName)
+                                <option value="{{ $modelName }}" @selected(old('model_name') === $modelName)>
+                                    {{ $modelName }}
+                                </option>
+                            @endforeach
+                        </select>
                     </div>
-                    <div id="model-dropdown" class="model-dropdown" aria-live="polite"></div>
                 </div>
             </div>
             <div class="scan-area">
@@ -581,8 +584,6 @@
         <script>
             // Handle model search and display items
             const modelInput = document.getElementById('model_name');
-            const modelDropdown = document.getElementById('model-dropdown');
-            const modelSearchButton = document.getElementById('model-search-btn');
             const itemsTableContainer = document.getElementById('items-table-container');
             const itemsTbody = document.getElementById('items-tbody');
             const scanProgressText = document.getElementById('scan-progress-text');
@@ -592,28 +593,27 @@
             const submitButton = document.querySelector('.submit');
             let scannedItems = {}; // Track scanned items
             let totalItems = 0;
-            let allModelNames = [];
-
-            function syncModelDropdownVisibility(forceVisible = false) {
-                const hasQuery = modelInput.value.trim().length > 0;
-                modelDropdown.classList.toggle('visible', forceVisible || document.activeElement === modelInput || hasQuery);
-            }
-
             updateMachineStatus('Locked');
+
             componentInput.disabled = true;
             submitButton.disabled = true;
             componentInput.placeholder = 'Pilih model terlebih dahulu';
 
             function updateMachineStatus(statusText = 'Locked') {
                 const isLocked = statusText === 'Locked';
+
+                // Update tampilan status machine
                 machineStatus.textContent = statusText;
                 machineStatus.classList.toggle('locked', isLocked);
 
+                // Kirim status ke Laravel
                 fetch('/interlock/machine-status', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
-                            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                            'X-CSRF-TOKEN': document.querySelector(
+                                'meta[name="csrf-token"]'
+                            ).content
                         },
                         body: JSON.stringify({
                             status: statusText
@@ -621,296 +621,197 @@
                     })
                     .then(response => {
                         console.log('HTTP STATUS:', response.status);
+
+                        if (!response.ok) {
+                            throw new Error(`HTTP Error ${response.status}`);
+                        }
+
                         return response.json();
                     })
                     .then(data => {
                         console.log('RESPONSE:', data);
                     })
                     .catch(error => {
-                        console.error('ERROR:', error);
+                        console.error('Gagal mengirim status machine:', error);
                     });
+            }
 
-                function updateProgress() {
-                    const completedCount = Object.values(scannedItems).filter(item => item.status !== 'Pending').length;
-                    scanProgressText.textContent = `Scan Completed ${completedCount}/${totalItems}`;
+            function updateProgress() {
+                const completedCount = Object.values(scannedItems)
+                    .filter(item => item.status !== 'Pending')
+                    .length;
 
-                    const progressPercent = totalItems > 0 ? (completedCount / totalItems) * 100 : 0;
-                    if (scanProgressText.parentElement) {
-                        scanProgressText.style.setProperty('--progress-percent', `${progressPercent}%`);
-                    }
+                scanProgressText.textContent =
+                    `Scan Completed ${completedCount}/${totalItems}`;
+
+                const progressPercent =
+                    totalItems > 0 ?
+                    (completedCount / totalItems) * 100 :
+                    0;
+
+                if (scanProgressText.parentElement) {
+                    scanProgressText.style.setProperty(
+                        '--progress-percent',
+                        `${progressPercent}%`
+                    );
+                }
+            }
+
+            async function loadModelItems(modelName) {
+                if (!modelName) {
+                    updateMachineStatus('Locked');
+                    componentInput.disabled = true;
+                    submitButton.disabled = true;
+                    componentInput.placeholder = 'Pilih model terlebih dahulu';
+                    return;
                 }
 
-                function renderModelOptions(filterText = '') {
-                    const query = filterText.trim().toLowerCase();
-                    const filteredModels = [...new Set(allModelNames.filter(Boolean))].filter(modelName => {
-                        if (!query) {
-                            return true;
-                        }
-
-                        return modelName.toLowerCase().includes(query);
-                    });
-
-                    modelDropdown.innerHTML = '';
-
-                    if (!filteredModels.length) {
-                        const emptyItem = document.createElement('div');
-                        emptyItem.className = 'model-option';
-                        emptyItem.textContent = 'Model tidak ditemukan';
-                        emptyItem.style.opacity = '0.8';
-                        emptyItem.style.cursor = 'default';
-                        modelDropdown.appendChild(emptyItem);
-                        syncModelDropdownVisibility(true);
-                        return;
+                try {
+                    const response = await fetch(`/api/model-items/${encodeURIComponent(modelName)}`);
+                    if (!response.ok) {
+                        throw new Error(`Gagal mengambil item model (${response.status})`);
                     }
 
-                    filteredModels.forEach(modelName => {
-                        const option = document.createElement('button');
-                        option.type = 'button';
-                        option.className = 'model-option';
-                        option.textContent = modelName;
-                        option.addEventListener('click', () => {
-                            modelInput.value = modelName;
-                            syncModelDropdownVisibility(true);
-                            loadModelItems(modelName);
-                        });
-                        modelDropdown.appendChild(option);
-                    });
+                    const items = await response.json();
 
-                    syncModelDropdownVisibility(true);
-                }
-
-                async function loadModelSuggestions() {
-                    try {
-                        const response = await fetch('/api/model-names');
-                        const modelNames = await response.json();
-                        allModelNames = [...new Set((modelNames || []).filter(Boolean))];
-                        renderModelOptions(modelInput.value);
-                    } catch (error) {
-                        console.error('Error loading model suggestions:', error);
-                    }
-                }
-
-                async function loadModelItems(modelName) {
-                    if (!modelName) {
+                    if (items.length > 0) {
+                        itemsTbody.innerHTML = '';
+                        scannedItems = {};
+                        totalItems = items.length;
+                        componentInput.disabled = false;
+                        submitButton.disabled = false;
+                        componentInput.placeholder = 'Scan Spareparts Here...';
                         updateMachineStatus('Locked');
-                        componentInput.disabled = true;
-                        submitButton.disabled = true;
-                        componentInput.placeholder = 'Pilih model terlebih dahulu';
-                        return;
-                    }
 
-                    try {
-                        const response = await fetch(`/api/model-items/${encodeURIComponent(modelName)}`);
-                        const items = await response.json();
+                        items.forEach(item => {
+                            const row = document.createElement('tr');
+                            row.id = `item-row-${item.id}`;
+                            row.style.cssText = 'border-bottom: 1px solid rgba(255, 255, 255, .08);';
 
-                        if (items.length > 0) {
-                            itemsTbody.innerHTML = '';
-                            scannedItems = {};
-                            totalItems = items.length;
-                            componentInput.disabled = false;
-                            submitButton.disabled = false;
-                            componentInput.placeholder = 'Scan Spareparts Here...';
-                            updateMachineStatus('Locked');
+                            const itemCell = document.createElement('td');
+                            itemCell.style.cssText =
+                                'padding: 1rem; text-align: left; font-size: .82rem;';
+                            itemCell.textContent = item.item_name;
 
-                            items.forEach(item => {
-                                const row = document.createElement('tr');
-                                row.id = `item-row-${item.id}`;
-                                row.style.cssText = 'border-bottom: 1px solid rgba(255, 255, 255, .08);';
+                            const statusCell = document.createElement('td');
+                            statusCell.style.cssText =
+                                'padding: 1rem; text-align: left; font-size: .82rem;';
+                            statusCell.id = `status-${item.id}`;
+                            statusCell.innerHTML = '<span style="color: #aaa;">Pending</span>';
 
-                                const itemCell = document.createElement('td');
-                                itemCell.style.cssText =
-                                    'padding: 1rem; text-align: left; font-size: .82rem;';
-                                itemCell.textContent = item.item_name;
+                            row.appendChild(itemCell);
+                            row.appendChild(statusCell);
+                            itemsTbody.appendChild(row);
 
-                                const statusCell = document.createElement('td');
-                                statusCell.style.cssText =
-                                    'padding: 1rem; text-align: left; font-size: .82rem;';
-                                statusCell.id = `status-${item.id}`;
-                                statusCell.innerHTML = '<span style="color: #aaa;">Pending</span>';
-
-                                row.appendChild(itemCell);
-                                row.appendChild(statusCell);
-                                itemsTbody.appendChild(row);
-
-                                scannedItems[item.id] = {
-                                    item_name: item.item_name,
-                                    status: 'Pending'
-                                };
-                            });
-
-                            itemsTableContainer.style.display = 'block';
-                            updateProgress();
-                            componentInput.focus();
-                        } else {
-                            updateMachineStatus('Locked');
-                            componentInput.disabled = true;
-                            submitButton.disabled = true;
-                            Swal.fire({
-                                icon: 'warning',
-                                title: 'Model Tidak Ditemukan',
-                                text: `Tidak ada item untuk model "${modelName}"`,
-                                confirmButtonColor: '#1677d2',
-                                confirmButtonText: 'OK'
-                            });
-                            itemsTableContainer.style.display = 'none';
-                        }
-                    } catch (error) {
-                        console.error('Error fetching items:', error);
-                        updateMachineStatus('Locked');
-                        componentInput.disabled = true;
-                        submitButton.disabled = true;
-                        Swal.fire({
-                            icon: 'error',
-                            title: 'Error',
-                            text: 'Gagal mengambil data item',
-                            confirmButtonColor: '#1677d2',
-                            confirmButtonText: 'OK'
+                            scannedItems[item.id] = {
+                                item_name: item.item_name,
+                                status: 'Pending'
+                            };
                         });
-                    }
-                }
 
-                modelInput.addEventListener('focus', () => {
-                    renderModelOptions(modelInput.value);
-                    syncModelDropdownVisibility(true);
-                });
-
-                modelInput.addEventListener('input', () => {
-                    renderModelOptions(modelInput.value);
-                    syncModelDropdownVisibility(true);
-                });
-
-                modelInput.addEventListener('keydown', async (e) => {
-                    if (e.key === 'Enter') {
-                        e.preventDefault();
-                        syncModelDropdownVisibility(true);
-                        loadModelItems(modelInput.value.trim());
-                    }
-                });
-
-                modelSearchButton.addEventListener('click', () => {
-                    syncModelDropdownVisibility(true);
-                    loadModelItems(modelInput.value.trim());
-                });
-
-                document.addEventListener('click', (event) => {
-                    if (!event.target.closest('.model-picker')) {
-                        modelDropdown.classList.remove('visible');
-                    }
-                });
-
-                loadModelSuggestions();
-
-                // Handle scanning validation
-
-                scanForm.addEventListener('submit', function(e) {
-                    e.preventDefault(); // Prevent form submission to server
-
-                    const scannedValue = componentInput.value.trim();
-
-                    if (!scannedValue || componentInput.disabled) {
-                        return;
-                    }
-
-                    const scannedValueUpper = scannedValue.toUpperCase();
-                    let matched = false;
-
-                    // Allow retry: a failed attempt should not permanently lock an item.
-                    for (const [itemId, itemData] of Object.entries(scannedItems)) {
-                        if (itemData.status === 'Success') {
-                            continue;
-                        }
-
-                        if (itemData.item_name.toUpperCase() === scannedValueUpper) {
-                            matched = true;
-                            const statusCell = document.getElementById(`status-${itemId}`);
-                            if (statusCell) {
-                                statusCell.innerHTML =
-                                    '<span style="color: #18794e; font-weight: 700;">✓ Success</span>';
-                                itemData.status = 'Success';
-                            }
-
-                            const modelName = document.getElementById('model_name').value;
-                            Swal.fire({
-                                icon: 'success',
-                                title: 'Berhasil!',
-                                text: `Komponen ${scannedValue} berhasil divalidasi untuk model ${modelName}.`,
-                                confirmButtonColor: '#1677d2',
-                                confirmButtonText: 'OK'
-                            });
-                            break;
-                        }
-                    }
-
-                    if (!matched && Object.keys(scannedItems).length > 0) {
-                        Swal.fire({
-                            icon: 'error',
-                            title: 'Gagal!',
-                            text: `Komponen ${scannedValue} tidak sesuai dengan daftar komponen yang diperlukan. Anda bisa scan ulang.`,
-                            confirmButtonColor: '#1677d2',
-                            confirmButtonText: 'OK'
-                        });
-                    }
-
-                    const successCount = Object.values(scannedItems).filter(item => item.status === 'Success')
-                        .length;
-                    const allCompleted = Object.keys(scannedItems).length > 0 && successCount === totalItems;
-
-                    if (allCompleted) {
-                        componentInput.disabled = true;
-                        submitButton.disabled = true;
-                        componentInput.placeholder = 'Semua komponen sesuai';
-                        updateMachineStatus('Running');
+                        itemsTableContainer.style.display = 'block';
+                        updateProgress();
+                        componentInput.focus();
                     } else {
                         updateMachineStatus('Locked');
+                        componentInput.disabled = true;
+                        submitButton.disabled = true;
+                        Swal.fire({
+                            icon: 'warning',
+                            title: 'Model Tidak Ditemukan',
+                            text: `Tidak ada item untuk model "${modelName}"`,
+                            confirmButtonColor: '#1677d2',
+                            confirmButtonText: 'OK'
+                        });
+                        itemsTableContainer.style.display = 'none';
+                    }
+                } catch (error) {
+                    console.error('Error fetching items:', error);
+                    updateMachineStatus('Locked');
+                    componentInput.disabled = true;
+                    submitButton.disabled = true;
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'Error',
+                        text: 'Gagal mengambil data item',
+                        confirmButtonColor: '#1677d2',
+                        confirmButtonText: 'OK'
+                    });
+                }
+            }
+
+            modelInput.addEventListener('change', () => {
+                loadModelItems(modelInput.value);
+            });
+
+            // Handle scanning validation
+
+            scanForm.addEventListener('submit', function(e) {
+                e.preventDefault(); // Prevent form submission to server
+
+                const scannedValue = componentInput.value.trim();
+
+                if (!scannedValue || componentInput.disabled) {
+                    return;
+                }
+
+                const scannedValueUpper = scannedValue.toUpperCase();
+                let matched = false;
+
+                // Allow retry: a failed attempt should not permanently lock an item.
+                for (const [itemId, itemData] of Object.entries(scannedItems)) {
+                    if (itemData.status === 'Success') {
+                        continue;
                     }
 
-                    updateProgress();
-                    componentInput.value = '';
-                    componentInput.focus();
-                });
-
-                modelInput.addEventListener('blur', async () => {
-                    const modelName = modelInput.value.trim();
-                    if (modelName && Object.keys(scannedItems).length === 0) {
-                        const response = await fetch(`/api/model-items/${encodeURIComponent(modelName)}`);
-                        const items = await response.json();
-
-                        if (items.length > 0) {
-                            itemsTbody.innerHTML = '';
-                            scannedItems = {};
-                            totalItems = items.length;
-
-                            items.forEach(item => {
-                                const row = document.createElement('tr');
-                                row.id = `item-row-${item.id}`;
-                                row.style.cssText =
-                                    'border-bottom: 1px solid rgba(255, 255, 255, .08);';
-
-                                const itemCell = document.createElement('td');
-                                itemCell.style.cssText =
-                                    'padding: 1rem; text-align: left; font-size: .82rem;';
-                                itemCell.textContent = item.item_name;
-
-                                const statusCell = document.createElement('td');
-                                statusCell.style.cssText =
-                                    'padding: 1rem; text-align: left; font-size: .82rem;';
-                                statusCell.id = `status-${item.id}`;
-                                statusCell.innerHTML = '<span style="color: #aaa;">Pending</span>';
-
-                                row.appendChild(itemCell);
-                                row.appendChild(statusCell);
-                                itemsTbody.appendChild(row);
-
-                                scannedItems[item.id] = {
-                                    item_name: item.item_name,
-                                    status: 'Pending'
-                                };
-                            });
-
-                            itemsTableContainer.style.display = 'block';
-                            updateProgress();
+                    if (itemData.item_name.toUpperCase() === scannedValueUpper) {
+                        matched = true;
+                        const statusCell = document.getElementById(`status-${itemId}`);
+                        if (statusCell) {
+                            statusCell.innerHTML =
+                                '<span style="color: #18794e; font-weight: 700;">✓ Success</span>';
+                            itemData.status = 'Success';
                         }
+
+                        const modelName = document.getElementById('model_name').value;
+                        Swal.fire({
+                            icon: 'success',
+                            title: 'Berhasil!',
+                            text: `Komponen ${scannedValue} berhasil divalidasi untuk model ${modelName}.`,
+                            confirmButtonColor: '#1677d2',
+                            confirmButtonText: 'OK'
+                        });
+                        break;
                     }
-                });
+                }
+
+                if (!matched && Object.keys(scannedItems).length > 0) {
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'Gagal!',
+                        text: `Komponen ${scannedValue} tidak sesuai dengan daftar komponen yang diperlukan. Anda bisa scan ulang.`,
+                        confirmButtonColor: '#1677d2',
+                        confirmButtonText: 'OK'
+                    });
+                }
+
+                const successCount = Object.values(scannedItems).filter(item => item.status === 'Success')
+                    .length;
+                const allCompleted = Object.keys(scannedItems).length > 0 && successCount === totalItems;
+
+                if (allCompleted) {
+                    componentInput.disabled = true;
+                    submitButton.disabled = true;
+                    componentInput.placeholder = 'Semua komponen sesuai';
+                    updateMachineStatus('Running');
+                } else {
+                    updateMachineStatus('Locked');
+                }
+
+                updateProgress();
+                componentInput.value = '';
+                componentInput.focus();
+            });
+
         </script>
 </x-app-layout>

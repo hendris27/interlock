@@ -2,11 +2,18 @@
 
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\MasterDataController;
+use App\Models\MasterData;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
-    return view('home');
+    $modelNames = MasterData::query()
+        ->select('model_name')
+        ->distinct()
+        ->orderBy('model_name')
+        ->pluck('model_name');
+
+    return view('home', compact('modelNames'));
 })->name('home');
 
 Route::post('/scan', function (Request $request) {
