@@ -35,6 +35,22 @@ Route::get('/api/model-items/{modelName}', function ($modelName) {
     $items = \App\Models\MasterData::where('model_name', $modelName)->get();
     return response()->json($items);
 });
+Route::post('/interlock/machine-status', function (Request $request) {
 
+    $status = $request->input('status');
+
+    $mqttCommand = $status === 'Running' ? 'ON' : 'OFF';
+
+    Http::post('http://127.0.0.1:1880/api/interlock/material', [
+        'status' => $status,
+        'command' => $mqttCommand,
+    ]);
+
+    return response()->json([
+        'success' => true,
+        'status' => $status,
+        'command' => $mqttCommand,
+    ]);
+});
 Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
 Route::resource('master-data', MasterDataController::class);
