@@ -593,7 +593,6 @@
             const submitButton = document.querySelector('.submit');
             let scannedItems = {}; // Track scanned items
             let totalItems = 0;
-            updateMachineStatus('Locked');
 
             componentInput.disabled = true;
             submitButton.disabled = true;
@@ -602,39 +601,50 @@
             function updateMachineStatus(statusText = 'Locked') {
                 const isLocked = statusText === 'Locked';
 
-                // Update tampilan status machine
                 machineStatus.textContent = statusText;
                 machineStatus.classList.toggle('locked', isLocked);
 
-                // Kirim status ke Laravel
+                console.log('STATUS MACHINE:', statusText);
+
                 fetch('/interlock/machine-status', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-CSRF-TOKEN': document.querySelector(
-                                'meta[name="csrf-token"]'
-                            ).content
-                        },
-                        body: JSON.stringify({
-                            status: statusText
-                        })
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        'X-CSRF-TOKEN': document.querySelector(
+                            'meta[name="csrf-token"]'
+                        ).content
+                    },
+                    body: JSON.stringify({
+                        status: statusText
                     })
-                    .then(response => {
-                        console.log('HTTP STATUS:', response.status);
+                })
+                .then(response => {
+                    console.log('HTTP STATUS:', response.status);
+
+                    return response.text().then(text => {
+                        console.log('RAW RESPONSE:', text);
 
                         if (!response.ok) {
-                            throw new Error(`HTTP Error ${response.status}`);
+                            throw new Error(`HTTP Error ${response.status}: ${text}`);
                         }
 
-                        return response.json();
-                    })
-                    .then(data => {
-                        console.log('RESPONSE:', data);
-                    })
-                    .catch(error => {
-                        console.error('Gagal mengirim status machine:', error);
+                        try {
+                            return JSON.parse(text);
+                        } catch (error) {
+                            throw new Error('Response Laravel bukan JSON: ' + text);
+                        }
                     });
+                })
+                .then(data => {
+                    console.log('LARAVEL RESPONSE:', data);
+                })
+                .catch(error => {
+                    console.error('GAGAL KIRIM STATUS:', error);
+                });
             }
+
+            updateMachineStatus('Locked');
 
             function updateProgress() {
                 const completedCount = Object.values(scannedItems)

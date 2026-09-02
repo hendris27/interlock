@@ -35,4 +35,8 @@ return [
         ],
     ],
 
+    'node_red' => [
+        'interlock_url' => env('NODE_RED_INTERLOCK_URL', 'http://127.0.0.1:1880/api/interlock/material'),
+    ],
+
 ];
