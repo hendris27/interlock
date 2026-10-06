@@ -46,6 +46,30 @@ Route::get('/api/model-items/{modelName}', function ($modelName) {
     return response()->json($items);
 });
 
+Route::post('/change-model/verify-pin', function (Request $request) {
+    $validated = $request->validate([
+        'pin' => ['required', 'string', 'digits:4'],
+    ]);
+
+    $expectedPin = config('services.interlock.model_change_pin');
+
+    if (! is_string($expectedPin) || $expectedPin === '') {
+        return response()->json([
+            'success' => false,
+            'message' => 'PIN Change Model belum dikonfigurasi.',
+        ], 503);
+    }
+
+    if (! hash_equals($expectedPin, $validated['pin'])) {
+        return response()->json([
+            'success' => false,
+            'message' => 'PIN tidak sesuai.',
+        ], 422);
+    }
+
+    return response()->json(['success' => true]);
+})->middleware('throttle:5,1')->name('change-model.verify-pin');
+
 Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
 Route::resource('master-data', MasterDataController::class);
 Route::post('/interlock/machine-status', function (Request $request) {
